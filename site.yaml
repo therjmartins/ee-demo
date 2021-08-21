@@ -1,7 +1,18 @@
 ---
-- name: Play that installs and configures VirtualBox and Vagrant
+- name: Play that deploys Jenkins after configuring VirtualBox and Vagrant
   hosts:
     - demo
   roles:
     - install_vbox
     - install_vagrant
+  tasks:
+    - name: Ensure that the vagrant-jenkins directory exists
+      file:
+        path: /home/{{ ansible_remote_user }}/vagrant-jenkins
+        state: directory
+
+    - name: Drop Vagrantfile onto host machine
+      template:
+        src: templates/Vagrantfile.j2
+        dest: /home/{{ ansible_remote_user }}/vagrant-jenkins
+        
