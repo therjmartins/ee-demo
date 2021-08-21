@@ -1,0 +1,9 @@
+---
+- block:
+    - name: Install Vagrant
+      apt:
+        name: vagrant
+        state: present
+        update_cache: yes
+    
+  become: true

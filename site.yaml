@@ -1,0 +1,7 @@
+---
+- name: Play that installs and configures VirtualBox and Vagrant
+  hosts:
+    - demo
+  roles:
+    - install_vbox
+    - install_vagrant

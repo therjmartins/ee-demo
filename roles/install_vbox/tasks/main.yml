@@ -1,0 +1,53 @@
+---
+- block:
+    - name: Install virtualbox
+      apt:
+        name: virtualbox
+        state: present
+        update_cache: yes
+
+    - name: Install virtualbox extras
+      apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      async: 300
+      poll: 0
+      register: extras_install
+      loop:
+        - virtualbox-ext-pack
+        - virtualbox-guest-additions-iso
+
+    - name: Accept virtualbox-ext-pack seen license
+      debconf:
+        name: virtualbox-ext-pack
+        question: virtualbox-ext-pack/license
+        value: 'true'
+        vtype: seen
+      register: seen
+      until: not seen['failed']
+      retries: 5
+
+    - name: Accept virtualbox-ext-pack select license
+      debconf:
+        name: virtualbox-ext-pack
+        question: virtualbox-ext-pack/license
+        value: 'true'
+        vtype: select
+      register: select
+      until: not select['failed']
+      retries: 5
+
+    - name: Confirm that install of extras has completed succesfully
+      assert:
+        that:
+          - extras_install['msg'] == "All items completed"
+        success_msg: "Install of VBox and extras has completed successfully"
+
+    - name: Ensure that vbox is started and enabled
+      systemd:
+        name: virtualbox
+        state: started
+        enabled: true
+  become: true
+  
