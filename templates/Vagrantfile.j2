@@ -6,7 +6,6 @@ require 'net/ssh'
 require 'yaml'
 required_plugins = %w(
   vagrant-hostmanager
-  vagrant-sshfs
 )
 
 VAGRANT_BOX = "ubuntu/focal64"
@@ -19,32 +18,35 @@ IP_PREFIX="192.168.10" # vbox virtual bridge
 
 # Setup variables for VM build
 
-GB = 1024
-CONTROLLER_MEM = 2*GB
-AGENT_MEM = 1*GB
-MACHINES = [
-  { name: "controller", ip: ip(101), primary: true, cpus: 4, mem: CONTROLLER_MEM, add_disk: false },
-  { name: "agent", ip: ip(111), primary: false, cpus: 2, mem: AGENT_MEM, add_disk: false },
-]
-ANSIBLE_VARS="ansible/inventory/vars.yml"
+CONTROLLER_MEM = "{{ jenkins_controller_mem | default ('2048') }}"
+CONTROLLER_CPU = "{{ jenkins_controller_cpu | default ('2') }}"
+AGENT_MEM = "{{ jenkins_agent_mem | default('1024') }}"
+AGENT_CPU = "{{ jenkins_agent_cpu | default('1') }}"
 
+MACHINES = [
+  { name: "controller", ip: ip(101), primary: true, cpus: CONTROLLER_CPU, mem: CONTROLLER_MEM },
+  { name: "agent", ip: ip(111), primary: false, cpus: AGENT_CPU, mem: AGENT_MEM },
+]
+
+ANSIBLE_INV="ansible/inventory/demo.yml"
 
 Vagrant.configure("2") do |config|
   config.vm.box = VAGRANT_BOX
-  config.vm.synced_folder ".", "/vagrant", type: "sshfs"
+  config.vm.synced_folder ".", "/vagrant", disabled: "true"
 
   # vagrant-hostmanager: Configure /etc/hosts in machines so that they can look each other up
   config.hostmanager.enabled = true
   config.hostmanager.manage_guest = true
   config.hostmanager.include_offline = true
 
-
   MACHINES.each do |m|
     node = m[:name]
     config.vm.define node, primary: m[:primary] do |c|
       c.vm.hostname = "#{node}.example.com"
-      c.vm.network :private_network, :ip => m[:ip], virtualbox_intnet: "ee-demo"
-      c.vm.network :public_network, bridge: "{{ ansible_default_ipv4.interface }}"
+      c.vm.network :private_network, :ip => m[:ip], virtualbox_intnet: "intnet"
+      if node == "controller"
+        c.vm.network :public_network, bridge: "{{ ansible_default_ipv4.interface }}"
+        end
       c.hostmanager.aliases = [node]
 
       c.vm.provider "virtualbox" do |vb|
@@ -52,24 +54,31 @@ Vagrant.configure("2") do |config|
         vb.memory = m[:mem]
         vb.name = m[:name]
         vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
-        add_disk vb, c.vm.hostname, m[:size], 1, 0 if m[:add_disk]
-        add_disk vb, c.vm.hostname, m[:size], 1, 1 if m[:add_disk]
       end
 
     end
+    if node == "controller"
+      config.vm.provision "ansible" do |ansible|
+        ansible.playbook = "ansible/deploy_jenkins.yml"
+        ansible.inventory_path = "ansible/inventory/demo.yml"
+        ansible.extra_vars = {
+          jenkins_user: "{{ jenkins_user | default('admin') }}",
+          jenkins_password: "{{ jenkins_password | default('password') }}"
+          }
+        end
+    end
   end
 end
-
 def generate_host_vars
   map = Hash.new
 
-  map["all"] = { "hosts" => {}}
+  map["jenkins"] = { "hosts" => {}}
 
   MACHINES.each do |m|
-    map["all"]["hosts"][m[:name]] = { "node_ip" => m[:ip]}
+    map["jenkins"]["hosts"][m[:name]] = { "ansible_host" => m[:ip]}
   end
 
-  File.open(ANSIBLE_VARS, "w") { |f| f.write(map.to_yaml) }
+  File.open(ANSIBLE_INV, "w") { |f| f.write(map.to_yaml) }
 end
 
 def install_plugins(plugins)

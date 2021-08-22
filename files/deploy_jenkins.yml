@@ -1,0 +1,145 @@
+---
+- name: Deploy Jenkins on the controller
+  hosts:
+    - controller
+  become: true
+  vars:
+    jenkins_url: "http://localhost:8080"
+    key_file: "{{ lookup('file','id_ssh_rsa') }}"
+  pre_tasks:
+    - name: Ensure the Jenkins apt repo key is installed
+      apt_key:
+        url: "https://pkg.jenkins.io/debian-stable/jenkins.io.key"
+        state: present
+
+    - name: Configure the Jenkins repo
+      apt_repository: 
+        repo: "deb https://pkg.jenkins.io/debian-stable binary/"
+        state: present
+
+    - name: Install Java and Jenkins
+      apt: 
+        name: "{{ item }}" 
+        update_cache: yes
+      loop:
+        - openjdk-11-jre
+        - jenkins
+
+    - name: Create the Jenkins init directory
+      file:
+        path: /var/lib/jenkins/init.groovy.d
+        state: directory
+        
+    - name: Add the basic-security file
+      copy:
+        src: ./basic-security.groovy
+        dest: /var/lib/jenkins/init.groovy.d/basic-security.groovy
+    
+    - name: Copy over the config file
+      copy:
+        src: ./jenkins_config
+        dest: /etc/default/jenkins
+
+    - name: Ensure Jenkins is restarted and enabled
+      systemd: 
+        name: jenkins 
+        state: restarted
+        enabled: true
+    
+    - name: Ensure port 8080 is open on the firewall
+      ufw:
+        rule: allow
+        port: '8080'
+        proto: tcp
+
+    - name: Pause for Jenkins to be ready
+      pause:
+        seconds: 15
+    
+    - name: Install plugins
+      jenkins_plugin:
+        name: "{{ item }}"
+        url_username: "{{ jenkins_user }}"
+        url_password: "{{ jenkins_password }}"
+        url: "{{ jenkins_url }}"
+      loop:
+        - ssh-credentials
+        - ssh-slaves
+      notify:
+        - restart jenkins
+    
+  tasks:
+    - name: Pause in case Jenkins restarted in pre_tasks
+      pause:
+        seconds: 15
+    
+    - name: Generate an SSH keypair
+      openssh_keypair:
+        path: id_ssh_rsa
+        size: 2048
+      delegate_to: localhost
+      become: false
+
+    - name: Create credentials
+      jenkins_script:
+        script: "{{ lookup('template', 'templates/cred.groovy.j2') }}"
+        user: "{{ jenkins_user }}"
+        password: "{{ jenkins_password }}"
+        url: "http://controller:8080"
+      delegate_to: localhost
+      become: false
+
+  handlers:
+    - name: restart jenkins
+      systemd:
+        name: jenkins
+        state: restarted
+
+- name: Prep the Jenkins Agent
+  hosts:
+    - agent
+  become: true
+  tasks:
+    - name: Add the jenkins user
+      user:
+        name: jenkins
+        create_home: true
+        shell: '/bin/bash'
+        generate_ssh_key: true
+    # Creating the ssh key here is actually about getting the supporting directory
+    # in place for the next task
+
+    - name: Add the public key to authorized keys file
+      copy:
+        src: id_ssh_rsa.pub
+        dest: /home/jenkins/.ssh/authorized_keys
+        mode: 0600
+        owner: jenkins
+        group: jenkins
+
+    - name: Install OpenJDK for the Jenkins agent to run on
+      apt:
+        name: openjdk-11-jre
+        update_cache: true
+
+    - name: Create the agent in Jenkins
+      jenkins_script:
+        script: "{{ lookup('template', 'files/agent.groovy') }}"
+        user: "{{ jenkins_user }}"
+        password: "{{ jenkins_password }}"
+        url: "http://controller:8080"
+      delegate_to: localhost
+      become: false
+
+- name: Show the user the connection information
+  hosts:
+    - controller
+  tasks:
+    - name: Capture the connection information post install
+      template:
+        src: templates/connection_info.j2
+        dest: /tmp/completion
+      delegate_to: localhost
+  
+  
+
