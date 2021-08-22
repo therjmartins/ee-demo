@@ -1,0 +1,94 @@
+---
+- name: Play that deploys Jenkins after configuring VirtualBox and Vagrant
+  hosts:
+    - demo
+  vars:
+    vj_path: /home/{{ ansible_user }}/vagrant-jenkins
+  vars_prompt:
+    - name: jenkins_user
+      prompt: "Please provide the name for the user to create in Jenkins"
+      private: false
+    - name: jenkins_password
+      prompt: "Please provide the password to set for the user created in Jenkins"
+      
+  pre_tasks:
+    - name: Ensure that the vagrant-jenkins directory exists
+      file:
+        path: "{{ vj_path }}"
+        state: directory
+
+    - name: Generate the Vagrantfile and send to host machine
+      template:
+        src: templates/Vagrantfile.j2
+        dest: "{{ vj_path }}/Vagrantfile"
+
+    - name: Ensure that the required Ansible provisioning directories exists
+      file:
+        path: "{{ vj_path }}/ansible/{{ item }}"
+        state: directory
+      loop:
+        - inventory
+        - templates
+        - files
+    
+    - name: Copy the Jenkins provisioning playbook over
+      copy:
+        src: files/deploy_jenkins.yml
+        dest: "{{ vj_path }}/ansible/"
+    
+    - name: Generate the basic-security file
+      template:
+        src: templates/basic-security.groovy.j2
+        dest: "{{ vj_path }}/ansible/basic-security.groovy"
+    
+    - name: Copy the Jenkins config file to the Ansible provisioning directory
+      copy:
+        src: files/jenkins_config
+        dest: "{{ vj_path }}/ansible/jenkins_config"
+
+    - name: Copy the Jenkins cred template to the Ansible provisioning directory
+      copy:
+        src: templates/cred.groovy.j2
+        dest: "{{ vj_path }}/ansible/templates/"
+
+    - name: Copy the Jenkins agent script to the Ansible provisioning directory
+      copy:
+        src: files/agent.groovy
+        dest: "{{ vj_path }}/ansible/files/agent.groovy"
+    
+    - name: Copy the Jenkins completion message template to the Ansible provisioning directory
+      copy:
+        src: templates/connection_info.j2
+        dest: "{{ vj_path }}/ansible/templates/"
+
+  roles:
+    - install_vbox
+    - install_vagrant
+  
+  tasks:
+    - name: Ensure that Ansible is installed on the host
+      apt:
+        name: ansible
+        update_cache: true
+        
+# The virtual host needs to have Ansible installed so that the local 
+# ansible provisioner in vagrant will operate
+
+    - name: Use Vagrant to complete the provisioning process
+      shell:
+        chdir: "{{ vj_path }}"
+        cmd: 'vagrant up'
+        creates: /tmp/vagrant_up_executed
+
+    - name: Fetch the results file 
+      fetch:
+        src: /tmp/completion
+        dest: /tmp/completion
+        flat: true
+    
+    - name: Print out connection information
+      debug:
+        msg: "{{ lookup('file', '/tmp/completion') }}"
+
+    
+
