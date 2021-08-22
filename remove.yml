@@ -1,0 +1,18 @@
+---
+##
+##
+## CAUTION: Using this playbook will irrevocably destroy the Jenkins deployment and 
+## the virtual machines on which it resided
+##
+##
+- name: Play that tears down and removes the virtual machines
+  hosts:
+    - demo
+  vars:
+    vj_path: /home/{{ ansible_user }}/vagrant-jenkins
+  tasks:
+    - name: Use Vagrant to complete the teardown process
+      shell:
+        chdir: "{{ vj_path }}"
+        cmd: 'vagrant destroy -f'
+        
